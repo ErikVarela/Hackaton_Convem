@@ -41,7 +41,22 @@ func InitDB(db *sql.DB) error {
 		return fmt.Errorf("erro ao criar tabela de historico: %w", err)
 	}
 
-	// 3. Inserir dados de exemplo (Seed) se a tabela estiver vazia
+	// 3. Criar tabela de comentarios (Change Request #1)
+	queryComments := `
+	CREATE TABLE IF NOT EXISTS incident_comments (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		incident_id INTEGER NOT NULL,
+		author TEXT NOT NULL,
+		content TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE
+	);`
+
+	if _, err := db.Exec(queryComments); err != nil {
+		return fmt.Errorf("erro ao criar tabela de comentarios: %w", err)
+	}
+
+	// 4. Inserir dados de exemplo (Seed) se a tabela estiver vazia
 	return seedDatabase(db)
 }
 
@@ -52,14 +67,12 @@ func seedDatabase(db *sql.DB) error {
 		return err
 	}
 
-	// Se ja existirem dados, nao faz nada
 	if count > 0 {
 		return nil
 	}
 
 	now := time.Now()
 
-	// Seed de incidentes exigidos no desafio
 	seeds := []struct {
 		Title       string
 		Description string
@@ -100,7 +113,6 @@ func seedDatabase(db *sql.DB) error {
 			return fmt.Errorf("erro ao inserir seed %s: %w", s.Title, err)
 		}
 
-		// Adiciona registro inicial no historico
 		id, _ := res.LastInsertId()
 		_, err = db.Exec(
 			`INSERT INTO incident_history (incident_id, previous_status, new_status, changed_at) 

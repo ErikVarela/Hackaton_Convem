@@ -40,6 +40,7 @@ func main() {
 	http.HandleFunc("/api/incidents/create", app.CreateIncidentHandler)
 	http.HandleFunc("/api/incidents/detail", app.GetIncidentDetailsHandler)
 	http.HandleFunc("/api/incidents/update-status", app.UpdateStatusHandler)
+	http.HandleFunc("/api/incidents/comment", app.AddCommentHandler)
 
 	fmt.Println("Servidor rodando em http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {

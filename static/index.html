@@ -25,13 +25,15 @@
     .badge-Medium { background: #ddf4ff; color: #0969da; }
     .badge-Low { background: #dafbe1; color: #1a7f37; }
     .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; }
-    .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 400px; max-width: 90%; }
+    .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 450px; max-width: 90%; max-height: 85vh; overflow-y: auto; }
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
     .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
     .alert { padding: 10px; border-radius: 4px; margin-bottom: 15px; display: none; font-size: 14px; }
     .alert-error { background: #ffebe9; color: #cf222e; border: 1px solid #ffc1c0; }
     .alert-success { background: #dafbe1; color: #1a7f37; border: 1px solid #4ac26b; }
+    ul.timeline-list { list-style: none; padding-left: 0; font-size: 13px; }
+    ul.timeline-list li { padding: 6px 0; border-bottom: 1px dashed #eee; }
   </style>
 </head>
 <body>
@@ -40,7 +42,6 @@
 
     <div id="alert" class="alert"></div>
 
-    <!-- Dashboard Cards -->
     <div class="cards">
       <div class="card">
         <h3>Incidentes Abertos</h3>
@@ -56,7 +57,6 @@
       </div>
     </div>
 
-    <!-- Filtros e Ações -->
     <div class="actions">
       <div class="filters">
         <label>Status:</label>
@@ -80,7 +80,6 @@
       <button class="btn" onclick="openModal('modal-create')">+ Novo Incidente</button>
     </div>
 
-    <!-- Tabela de Incidentes -->
     <table>
       <thead>
         <tr>
@@ -96,7 +95,6 @@
     </table>
   </div>
 
-  <!-- Modal Criar Incidente -->
   <div id="modal-create" class="modal">
     <div class="modal-content">
       <h2>Novo Incidente</h2>
@@ -128,7 +126,6 @@
     </div>
   </div>
 
-  <!-- Modal Alterar Status e Ver Histórico -->
   <div id="modal-detail" class="modal">
     <div class="modal-content">
       <h2 id="detail-title">Detalhes do Incidente</h2>
@@ -144,8 +141,19 @@
         <button class="btn" style="margin-top: 5px; width: 100%;" onclick="updateStatus()">Atualizar Status</button>
       </div>
 
-      <h3>Histórico de Mudanças</h3>
-      <ul id="detail-history" style="font-size: 12px; padding-left: 20px; color: #444;"></ul>
+      <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+
+      <h3>Timeline de Atividades</h3>
+      <ul id="detail-timeline" class="timeline-list"></ul>
+
+      <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+
+      <h4>Adicionar Comentário</h4>
+      <div class="form-group">
+        <input type="text" id="comment-author" placeholder="Seu nome (Autor)*" style="margin-bottom: 5px;">
+        <textarea id="comment-content" rows="2" placeholder="Digite seu comentário...*"></textarea>
+        <button class="btn" style="margin-top: 5px; width: 100%;" onclick="addComment()">Enviar Comentário</button>
+      </div>
 
       <div style="text-align: right; margin-top: 15px;">
         <button onclick="closeModal('modal-detail')">Fechar</button>
@@ -225,11 +233,15 @@
       document.getElementById("detail-desc").innerText = data.incident.description;
       document.getElementById("update-status-val").value = data.incident.status;
 
-      const historyUl = document.getElementById("detail-history");
-      historyUl.innerHTML = "";
-      (data.history || []).forEach(h => {
-        const dt = new Date(h.changed_at).toLocaleTimeString();
-        historyUl.innerHTML += `<li>${dt} — ${h.previous_status} → ${h.new_status}</li>`;
+      const timelineUl = document.getElementById("detail-timeline");
+      timelineUl.innerHTML = "";
+      (data.timeline || []).forEach(item => {
+        const dt = new Date(item.timestamp).toLocaleTimeString();
+        if (item.type === "status_change") {
+          timelineUl.innerHTML += `<li><strong>${dt}</strong> — Status mudou: <em>${item.old_status} → ${item.new_status}</em></li>`;
+        } else if (item.type === "comment") {
+          timelineUl.innerHTML += `<li><strong>${dt}</strong> — <strong>${item.author}</strong> comentou: "${item.content}"</li>`;
+        }
       });
 
       openModal("modal-detail");
@@ -244,12 +256,33 @@
       });
 
       if (res.ok) {
-        closeModal("modal-detail");
         showAlert("Status atualizado com sucesso!", false);
+        openDetail(currentIncidentId);
         loadIncidents();
       } else {
         const errText = await res.text();
         showAlert(errText || "Erro ao atualizar status.");
+      }
+    }
+
+    async function addComment() {
+      const author = document.getElementById("comment-author").value;
+      const content = document.getElementById("comment-content").value;
+
+      const res = await fetch(`/api/incidents/comment?id=${currentIncidentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author, content })
+      });
+
+      if (res.ok) {
+        document.getElementById("comment-author").value = "";
+        document.getElementById("comment-content").value = "";
+        showAlert("Comentário adicionado!", false);
+        openDetail(currentIncidentId);
+      } else {
+        const errText = await res.text();
+        showAlert(errText || "Erro ao adicionar comentário.");
       }
     }
 

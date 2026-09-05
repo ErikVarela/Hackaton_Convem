@@ -54,3 +54,29 @@ func TestValidateStatusTransition(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateComment(t *testing.T) {
+	tests := []struct {
+		name        string
+		author      string
+		content     string
+		expectError bool
+	}{
+		{"Comentario Valido", "Ana", "Provedor contatado.", false},
+		{"Autor Vazio", "", "Provedor contatado.", true},
+		{"Conteudo Vazio", "Ana", "   ", true},
+		{"Ambos Vazios", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateComment(tt.author, tt.content)
+			if tt.expectError && err == nil {
+				t.Errorf("esperava erro mas obteve nil no caso %s", tt.name)
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("nao esperava erro mas obteve %v no caso %s", err, tt.name)
+			}
+		})
+	}
+}

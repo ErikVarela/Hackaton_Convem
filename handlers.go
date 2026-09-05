@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -12,14 +13,12 @@ type Application struct {
 	DB *sql.DB
 }
 
-// DashboardDTO estrutura os dados para a visão resumida
 type DashboardDTO struct {
 	OpenIncidents           int `json:"open_incidents"`
 	CriticalUnresolvedCount int `json:"critical_unresolved"`
 	ResolvedIncidents       int `json:"resolved_incidents"`
 }
 
-// GetDashboardHandler calcula os 3 indicadores exigidos
 func (app *Application) GetDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	var dash DashboardDTO
 
@@ -31,7 +30,6 @@ func (app *Application) GetDashboardHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(dash)
 }
 
-// ListIncidentsHandler lista e filtra por status e severidade
 func (app *Application) ListIncidentsHandler(w http.ResponseWriter, r *http.Request) {
 	statusFilter := r.URL.Query().Get("status")
 	severityFilter := r.URL.Query().Get("severity")
@@ -68,7 +66,6 @@ func (app *Application) ListIncidentsHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(incidents)
 }
 
-// CreateIncidentHandler cadastra um novo incidente (sempre inicia em Open)
 func (app *Application) CreateIncidentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
@@ -104,7 +101,6 @@ func (app *Application) CreateIncidentHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "message": "Incidente criado com sucesso"})
 }
 
-// UpdateStatusHandler altera o status validando a regra de negócio e gravando o histórico
 func (app *Application) UpdateStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
@@ -133,7 +129,6 @@ func (app *Application) UpdateStatusHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Executa a validação da regra de negócio crítica
 	if err := ValidateStatusTransition(inc.Severity, inc.Status, req.NewStatus); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -146,14 +141,54 @@ func (app *Application) UpdateStatusHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Registra alteração no histórico
 	_, _ = app.DB.Exec("INSERT INTO incident_history (incident_id, previous_status, new_status, changed_at) VALUES (?, ?, ?, ?)", id, inc.Status, req.NewStatus, now)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Status atualizado com sucesso"})
 }
 
-// GetIncidentDetailsHandler retorna o detalhe do incidente e todo o histórico de mudanças
+func (app *Application) AddCommentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.URL.Query().Get("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Author  string `json:"author"`
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Requisição inválida", http.StatusBadRequest)
+		return
+	}
+
+	if err := ValidateComment(req.Author, req.Content); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now()
+	_, err = app.DB.Exec(
+		"INSERT INTO incident_comments (incident_id, author, content, created_at) VALUES (?, ?, ?, ?)",
+		id, req.Author, req.Content, now,
+	)
+	if err != nil {
+		http.Error(w, "Erro ao salvar comentário", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Comentário adicionado com sucesso"})
+}
+
 func (app *Application) GetIncidentDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
 	id, err := strconv.Atoi(idStr)
@@ -170,20 +205,38 @@ func (app *Application) GetIncidentDetailsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	rows, _ := app.DB.Query("SELECT id, incident_id, previous_status, new_status, changed_at FROM incident_history WHERE incident_id = ? ORDER BY changed_at ASC", id)
-	defer rows.Close()
+	var timeline []TimelineItem
 
-	var history []IncidentHistory
-	for rows.Next() {
-		var h IncidentHistory
-		if err := rows.Scan(&h.ID, &h.IncidentID, &h.PreviousStatus, &h.NewStatus, &h.ChangedAt); err == nil {
-			history = append(history, h)
+	// 1. Buscar Historico de Status
+	rowsH, _ := app.DB.Query("SELECT previous_status, new_status, changed_at FROM incident_history WHERE incident_id = ?", id)
+	defer rowsH.Close()
+	for rowsH.Next() {
+		var item TimelineItem
+		item.Type = "status_change"
+		if err := rowsH.Scan(&item.OldStatus, &item.NewStatus, &item.Timestamp); err == nil {
+			timeline = append(timeline, item)
 		}
 	}
+
+	// 2. Buscar Comentarios
+	rowsC, _ := app.DB.Query("SELECT author, content, created_at FROM incident_comments WHERE incident_id = ?", id)
+	defer rowsC.Close()
+	for rowsC.Next() {
+		var item TimelineItem
+		item.Type = "comment"
+		if err := rowsC.Scan(&item.Author, &item.Content, &item.Timestamp); err == nil {
+			timeline = append(timeline, item)
+		}
+	}
+
+	// 3. Ordenar Cronologicamente por Data/Hora
+	sort.Slice(timeline, func(i, j int) bool {
+		return timeline[i].Timestamp.Before(timeline[j].Timestamp)
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"incident": inc,
-		"history":  history,
+		"timeline": timeline,
 	})
 }
