@@ -1,3 +1,7 @@
+# Objetivo deste repositório:
+
+O objetivo foi criar uma API na linguagem GO apenas utilizando IA, onde construí somente com o código que a IA me retornava, sem fazer qualquer alteração manualmente. Caso a IA me retornasse algo indesejado eu deveria solicitar alterações e ponderar o que era certa ou errado.
+
 # 🚨 Incident Hub
 
 Aplicação web para registro, acompanhamento e gestão do ciclo de vida de incidentes operacionais.
